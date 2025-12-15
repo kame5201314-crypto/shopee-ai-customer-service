@@ -1,0 +1,58 @@
+# ============================================
+# 蝦皮 AI 自動客服系統 - 完整套件清單
+# ============================================
+# 安裝方式: pip install -r requirements.txt
+# 安裝完成後需執行: playwright install chromium
+
+# ============================================
+# 核心套件
+# ============================================
+
+# Playwright 瀏覽器自動化框架 (asyncio 非同步)
+playwright>=1.40.0
+
+# OpenAI API 客戶端
+openai>=1.0.0
+
+# 環境變數管理
+python-dotenv>=1.0.0
+
+# 偽裝瀏覽器指紋
+fake-useragent>=1.4.0
+
+# ============================================
+# Web 控制台套件
+# ============================================
+
+# FastAPI Web 框架
+fastapi>=0.104.0
+
+# ASGI 伺服器
+uvicorn[standard]>=0.24.0
+
+# 資料驗證
+pydantic>=2.0.0
+
+# ============================================
+# 安裝步驟:
+# ============================================
+#
+# 1. 安裝 Python 套件
+#    pip install -r requirements.txt
+#
+# 2. 安裝 Playwright 瀏覽器
+#    playwright install chromium
+#
+# 3. 複製環境變數檔案
+#    copy .env.example .env  (Windows)
+#    cp .env.example .env    (Mac/Linux)
+#
+# 4. 編輯 .env 填入您的 OpenAI API Key
+#
+# 5. 啟動 Web 控制台
+#    python server.py
+#
+# 6. 開啟瀏覽器訪問
+#    http://localhost:8000
+#
+# ============================================
