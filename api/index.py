@@ -738,7 +738,8 @@ DASHBOARD_HTML = """
                             <option value="gpt-3.5-turbo">GPT-3.5 Turbo (最便宜)</option>
                         </optgroup>
                         <optgroup label="Google Gemini 模型">
-                            <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash (最新，推薦)</option>
+                            <option value="gemini-2.5-flash-preview-05-20">Gemini 2.5 Flash (最新，推薦)</option>
+                            <option value="gemini-2.0-flash">Gemini 2.0 Flash (穩定版)</option>
                             <option value="gemini-1.5-pro">Gemini 1.5 Pro (最強)</option>
                             <option value="gemini-1.5-flash">Gemini 1.5 Flash (快速)</option>
                             <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash-8B (最便宜)</option>
@@ -908,7 +909,8 @@ DASHBOARD_HTML = """
             'gpt-4o': '最強大的 OpenAI 模型，回覆品質最高',
             'gpt-4-turbo': '強大且快速，價格中等',
             'gpt-3.5-turbo': '最便宜的選擇，品質尚可',
-            'gemini-2.0-flash-exp': '最新！Google 最新模型，速度快品質好',
+            'gemini-2.5-flash-preview-05-20': '最新！Gemini 2.5 Flash，性能最強',
+            'gemini-2.0-flash': 'Gemini 2.0 穩定版，速度快品質好',
             'gemini-1.5-pro': 'Google 最強模型，支援超長上下文',
             'gemini-1.5-flash': '快速且便宜，適合一般用途',
             'gemini-1.5-flash-8b': '最便宜的 Gemini 模型'
@@ -996,7 +998,7 @@ DASHBOARD_HTML = """
             if (provider === 'openai' && !modelSelect.value.startsWith('gpt')) {
                 modelSelect.value = 'gpt-4o-mini';
             } else if (provider === 'gemini' && !modelSelect.value.startsWith('gemini')) {
-                modelSelect.value = 'gemini-2.0-flash-exp';
+                modelSelect.value = 'gemini-2.5-flash-preview-05-20';
             }
             updateModelInfo();
         }
