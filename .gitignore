@@ -1,7 +1,44 @@
-# Environment variables
+# ============================================
+# 敏感資料 - 絕對不能上傳
+# ============================================
 .env
+.env.*
+*.env
+.env.local
+.env.development
+.env.production
+.env.test
+config.json
+secrets.json
+credentials.json
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
 
+# API Keys 和 Token 檔案
+*api_key*
+*apikey*
+*secret*
+*token*
+!*_example*
+
+# 資料庫檔案
+*.db
+*.sqlite
+*.sqlite3
+data/
+database/
+
+# 審計日誌 (包含敏感操作記錄)
+logs/
+audit_logs/
+*.log
+
+# ============================================
 # Python
+# ============================================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -10,20 +47,81 @@ __pycache__/
 venv/
 env/
 .venv/
+ENV/
+.eggs/
+*.egg-info/
+*.egg
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
 
-# Browser data (login sessions)
+# ============================================
+# Node.js
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# ============================================
+# 瀏覽器/自動化資料
+# ============================================
 browser_data/
+playwright-data/
+*.cookie
+*.session
 
-# IDE
+# ============================================
+# IDE 和編輯器
+# ============================================
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
 
-# OS
+# ============================================
+# 作業系統
+# ============================================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Logs
-*.log
+# ============================================
+# 部署相關
+# ============================================
 .vercel
+.netlify
+.serverless/
+
+# ============================================
+# 備份檔案
+# ============================================
+*.bak
+*.backup
+*.old
+*.orig
+*~
+
+# ============================================
+# 測試和暫存
+# ============================================
+tmp/
+temp/
+.tmp/
+.temp/
+*.tmp
+*.temp
