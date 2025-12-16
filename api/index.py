@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 蝦皮 AI 客服系統 - Vercel Serverless 入口
+支援 OpenAI 和 Google Gemini
 """
 
 import json
@@ -19,8 +20,10 @@ from pydantic import BaseModel
 
 # 預設設定
 DEFAULT_CONFIG = {
+    "ai_provider": "openai",  # openai 或 gemini
     "openai_api_key": "",
-    "openai_model": "gpt-4o-mini",
+    "gemini_api_key": "",
+    "ai_model": "gpt-4o-mini",
     "shopee_chat_url": "https://seller.shopee.tw/portal/chatroom",
     "refresh_min": 30,
     "refresh_max": 60,
@@ -61,8 +64,10 @@ app = FastAPI(title="蝦皮 AI 客服控制台")
 
 
 class ConfigModel(BaseModel):
+    ai_provider: str = "openai"
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
+    gemini_api_key: str = ""
+    ai_model: str = "gpt-4o-mini"
     shopee_chat_url: str = ""
     refresh_min: int = 30
     refresh_max: int = 60
@@ -85,12 +90,18 @@ async def index():
 @app.get("/api/config")
 async def get_config():
     config = current_config.copy()
-    # 遮蔽 API Key
+    # 遮蔽 OpenAI API Key
     if config.get("openai_api_key"):
         key = config["openai_api_key"]
-        config["api_key_display"] = key[:8] + "..." + key[-4:] if len(key) > 12 else "已設定"
+        config["openai_api_key_display"] = key[:8] + "..." + key[-4:] if len(key) > 12 else "已設定"
     else:
-        config["api_key_display"] = "未設定"
+        config["openai_api_key_display"] = "未設定"
+    # 遮蔽 Gemini API Key
+    if config.get("gemini_api_key"):
+        key = config["gemini_api_key"]
+        config["gemini_api_key_display"] = key[:8] + "..." + key[-4:] if len(key) > 12 else "已設定"
+    else:
+        config["gemini_api_key_display"] = "未設定"
     return config
 
 
@@ -101,6 +112,8 @@ async def update_config(config: ConfigModel):
     # 如果 API Key 為空，保留舊的
     if not data.get("openai_api_key"):
         data["openai_api_key"] = current_config.get("openai_api_key", "")
+    if not data.get("gemini_api_key"):
+        data["gemini_api_key"] = current_config.get("gemini_api_key", "")
     current_config.update(data)
     return {"success": True, "message": "設定已儲存"}
 
@@ -111,11 +124,17 @@ async def download_env():
     env_content = f"""# 蝦皮 AI 客服系統設定檔
 # 請將此檔案放到專案目錄並命名為 .env
 
+# AI 提供商 (openai 或 gemini)
+AI_PROVIDER={current_config.get('ai_provider', 'openai')}
+
 # OpenAI API Key
 OPENAI_API_KEY={current_config.get('openai_api_key', '')}
 
+# Google Gemini API Key
+GEMINI_API_KEY={current_config.get('gemini_api_key', '')}
+
 # AI 模型
-OPENAI_MODEL={current_config.get('openai_model', 'gpt-4o-mini')}
+AI_MODEL={current_config.get('ai_model', 'gpt-4o-mini')}
 
 # 蝦皮聊天頁面網址
 SHOPEE_CHAT_URL={current_config.get('shopee_chat_url', 'https://seller.shopee.tw/portal/chatroom')}
@@ -185,6 +204,11 @@ DASHBOARD_HTML = """
         .tab.active { border-color: #ee4d2d; color: #ee4d2d; background: #fef2f2; }
         .section-title { font-size: 18px; font-weight: 700; color: #1f2937; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
         .help-text { font-size: 13px; color: #9ca3af; margin-top: 6px; }
+        .provider-btn { padding: 12px 24px; border: 2px solid #e5e7eb; border-radius: 12px; cursor: pointer; transition: 0.3s; font-weight: 600; }
+        .provider-btn.active { border-color: #ee4d2d; background: #fef2f2; color: #ee4d2d; }
+        .provider-btn:hover { border-color: #ee4d2d; }
+        .api-section { border: 2px solid #e5e7eb; border-radius: 16px; padding: 20px; margin-top: 16px; }
+        .api-section.active { border-color: #ee4d2d; background: #fffbfa; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -250,32 +274,75 @@ DASHBOARD_HTML = """
             <!-- 基本設定 -->
             <div id="panel-basic" class="p-8">
                 <div class="section-title">
-                    <i class="fas fa-key text-purple-500"></i> OpenAI API 設定
+                    <i class="fas fa-brain text-purple-500"></i> AI 提供商選擇
                 </div>
 
-                <div class="space-y-6 max-w-2xl">
-                    <div>
-                        <label class="block font-medium text-gray-700 mb-2">API Key</label>
-                        <input type="password" id="cfg-api-key" class="input-field" placeholder="sk-...">
-                        <p class="help-text">目前狀態: <span id="api-key-status" class="font-medium">檢查中...</span></p>
-                        <p class="help-text">取得 API Key: <a href="https://platform.openai.com/api-keys" target="_blank" class="text-blue-500 hover:underline">platform.openai.com/api-keys</a></p>
+                <div class="flex gap-4 mb-6">
+                    <div class="provider-btn active" id="provider-openai" onclick="selectProvider('openai')">
+                        <i class="fas fa-robot mr-2"></i> OpenAI
                     </div>
+                    <div class="provider-btn" id="provider-gemini" onclick="selectProvider('gemini')">
+                        <i class="fas fa-gem mr-2"></i> Google Gemini
+                    </div>
+                </div>
 
-                    <div>
-                        <label class="block font-medium text-gray-700 mb-2">AI 模型</label>
-                        <select id="cfg-model" class="input-field">
+                <!-- OpenAI 設定 -->
+                <div id="openai-section" class="api-section active">
+                    <div class="flex items-center gap-2 mb-4">
+                        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/OpenAI_Logo.svg/32px-OpenAI_Logo.svg.png" class="w-6 h-6" onerror="this.style.display='none'">
+                        <h4 class="font-bold text-gray-800">OpenAI API 設定</h4>
+                    </div>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block font-medium text-gray-700 mb-2">OpenAI API Key</label>
+                            <input type="password" id="cfg-openai-key" class="input-field" placeholder="sk-...">
+                            <p class="help-text">目前狀態: <span id="openai-key-status" class="font-medium">檢查中...</span></p>
+                            <p class="help-text">取得 API Key: <a href="https://platform.openai.com/api-keys" target="_blank" class="text-blue-500 hover:underline">platform.openai.com/api-keys</a></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Gemini 設定 -->
+                <div id="gemini-section" class="api-section mt-4">
+                    <div class="flex items-center gap-2 mb-4">
+                        <i class="fas fa-gem text-blue-500 text-xl"></i>
+                        <h4 class="font-bold text-gray-800">Google Gemini API 設定</h4>
+                    </div>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block font-medium text-gray-700 mb-2">Gemini API Key</label>
+                            <input type="password" id="cfg-gemini-key" class="input-field" placeholder="AIza...">
+                            <p class="help-text">目前狀態: <span id="gemini-key-status" class="font-medium">檢查中...</span></p>
+                            <p class="help-text">取得 API Key: <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-500 hover:underline">aistudio.google.com/app/apikey</a></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI 模型選擇 -->
+                <div class="mt-6">
+                    <label class="block font-medium text-gray-700 mb-2">AI 模型</label>
+                    <select id="cfg-model" class="input-field" onchange="updateModelInfo()">
+                        <optgroup label="OpenAI 模型" id="openai-models">
                             <option value="gpt-4o-mini">GPT-4o Mini (推薦，便宜快速)</option>
                             <option value="gpt-4o">GPT-4o (更強，較貴)</option>
                             <option value="gpt-4-turbo">GPT-4 Turbo</option>
                             <option value="gpt-3.5-turbo">GPT-3.5 Turbo (最便宜)</option>
-                        </select>
-                    </div>
+                        </optgroup>
+                        <optgroup label="Google Gemini 模型" id="gemini-models">
+                            <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash (最新，推薦)</option>
+                            <option value="gemini-1.5-pro">Gemini 1.5 Pro (最強)</option>
+                            <option value="gemini-1.5-flash">Gemini 1.5 Flash (快速)</option>
+                            <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash-8B (最便宜)</option>
+                        </optgroup>
+                    </select>
+                    <p class="help-text" id="model-info">選擇適合的 AI 模型</p>
+                </div>
 
-                    <div>
-                        <label class="block font-medium text-gray-700 mb-2">蝦皮聊天頁面網址</label>
-                        <input type="url" id="cfg-url" class="input-field" placeholder="https://seller.shopee.tw/portal/chatroom">
-                        <p class="help-text">台灣蝦皮賣家中心聊天頁面</p>
-                    </div>
+                <!-- 蝦皮網址 -->
+                <div class="mt-6">
+                    <label class="block font-medium text-gray-700 mb-2">蝦皮聊天頁面網址</label>
+                    <input type="url" id="cfg-url" class="input-field" placeholder="https://seller.shopee.tw/portal/chatroom">
+                    <p class="help-text">台灣蝦皮賣家中心聊天頁面</p>
                 </div>
 
                 <button onclick="saveConfig()" class="btn btn-primary text-white px-8 py-4 rounded-xl font-bold mt-8">
@@ -414,6 +481,58 @@ DASHBOARD_HTML = """
 
     <script>
         let config = {};
+        let currentProvider = 'openai';
+
+        // 模型資訊
+        const modelInfo = {
+            'gpt-4o-mini': '推薦！快速且便宜，適合一般客服對話',
+            'gpt-4o': '最強大的 OpenAI 模型，回覆品質最高',
+            'gpt-4-turbo': '強大且快速，價格中等',
+            'gpt-3.5-turbo': '最便宜的選擇，品質尚可',
+            'gemini-2.0-flash-exp': '最新！Google 最新模型，速度快品質好',
+            'gemini-1.5-pro': 'Google 最強模型，支援超長上下文',
+            'gemini-1.5-flash': '快速且便宜，適合一般用途',
+            'gemini-1.5-flash-8b': '最便宜的 Gemini 模型'
+        };
+
+        // 選擇 AI 提供商
+        function selectProvider(provider) {
+            currentProvider = provider;
+
+            // 更新按鈕樣式
+            document.getElementById('provider-openai').classList.toggle('active', provider === 'openai');
+            document.getElementById('provider-gemini').classList.toggle('active', provider === 'gemini');
+
+            // 更新區塊樣式
+            document.getElementById('openai-section').classList.toggle('active', provider === 'openai');
+            document.getElementById('gemini-section').classList.toggle('active', provider === 'gemini');
+
+            // 自動選擇對應的模型
+            const modelSelect = document.getElementById('cfg-model');
+            if (provider === 'openai') {
+                if (!modelSelect.value.startsWith('gpt')) {
+                    modelSelect.value = 'gpt-4o-mini';
+                }
+            } else {
+                if (!modelSelect.value.startsWith('gemini')) {
+                    modelSelect.value = 'gemini-2.0-flash-exp';
+                }
+            }
+            updateModelInfo();
+        }
+
+        // 更新模型說明
+        function updateModelInfo() {
+            const model = document.getElementById('cfg-model').value;
+            document.getElementById('model-info').textContent = modelInfo[model] || '選擇適合的 AI 模型';
+
+            // 自動切換提供商
+            if (model.startsWith('gpt') && currentProvider !== 'openai') {
+                selectProvider('openai');
+            } else if (model.startsWith('gemini') && currentProvider !== 'gemini') {
+                selectProvider('gemini');
+            }
+        }
 
         // 載入設定
         async function loadConfig() {
@@ -421,10 +540,17 @@ DASHBOARD_HTML = """
                 const res = await fetch('/api/config');
                 config = await res.json();
 
-                document.getElementById('api-key-status').textContent = config.api_key_display || '未設定';
-                document.getElementById('api-key-status').className = config.openai_api_key ? 'font-medium text-green-600' : 'font-medium text-red-500';
+                // API Key 狀態
+                document.getElementById('openai-key-status').textContent = config.openai_api_key_display || '未設定';
+                document.getElementById('openai-key-status').className = config.openai_api_key ? 'font-medium text-green-600' : 'font-medium text-red-500';
 
-                document.getElementById('cfg-model').value = config.openai_model || 'gpt-4o-mini';
+                document.getElementById('gemini-key-status').textContent = config.gemini_api_key_display || '未設定';
+                document.getElementById('gemini-key-status').className = config.gemini_api_key ? 'font-medium text-green-600' : 'font-medium text-red-500';
+
+                // 選擇提供商
+                selectProvider(config.ai_provider || 'openai');
+
+                document.getElementById('cfg-model').value = config.ai_model || 'gpt-4o-mini';
                 document.getElementById('cfg-url').value = config.shopee_chat_url || '';
                 document.getElementById('cfg-refresh-min').value = config.refresh_min || 30;
                 document.getElementById('cfg-refresh-max').value = config.refresh_max || 60;
@@ -438,6 +564,8 @@ DASHBOARD_HTML = """
                 setToggle('toggle-auto-reply', config.auto_reply !== false);
                 setToggle('toggle-typo', config.typo_simulation !== false);
                 setToggle('toggle-kb', config.use_knowledge_base !== false);
+
+                updateModelInfo();
             } catch (e) {
                 console.error('載入設定失敗:', e);
             }
@@ -445,11 +573,14 @@ DASHBOARD_HTML = """
 
         // 儲存設定
         async function saveConfig() {
-            const apiKey = document.getElementById('cfg-api-key').value;
+            const openaiKey = document.getElementById('cfg-openai-key').value;
+            const geminiKey = document.getElementById('cfg-gemini-key').value;
 
             const data = {
-                openai_api_key: apiKey || config.openai_api_key || '',
-                openai_model: document.getElementById('cfg-model').value,
+                ai_provider: currentProvider,
+                openai_api_key: openaiKey || config.openai_api_key || '',
+                gemini_api_key: geminiKey || config.gemini_api_key || '',
+                ai_model: document.getElementById('cfg-model').value,
                 shopee_chat_url: document.getElementById('cfg-url').value,
                 refresh_min: parseInt(document.getElementById('cfg-refresh-min').value) || 30,
                 refresh_max: parseInt(document.getElementById('cfg-refresh-max').value) || 60,
