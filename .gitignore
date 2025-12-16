@@ -125,3 +125,29 @@ temp/
 .temp/
 *.tmp
 *.temp
+
+# ============================================
+# 安全相關 - 永不上傳
+# ============================================
+
+# 設定資料（可能包含 API Key）
+config_data.json
+
+# Session 資料
+sessions/
+
+# 備份目錄
+backups/
+
+# Google Service Account
+*-service-account*.json
+*serviceaccount*.json
+
+# 私鑰
+private_key*
+*.private
+
+# 密碼檔案
+*password*
+*passwd*
+!*_example*
