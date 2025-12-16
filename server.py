@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 蝦皮 AI 客服系統 - 雲端控制台
-可部署到 Render / Railway / Vercel
+使用 Gemini 2.5 Flash + Context Caching
 """
 
 import json
@@ -15,6 +15,9 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import uvicorn
 
+from gemini_service import get_gemini_service, initialize_gemini, generate_reply, refresh_knowledge_base, get_knowledge_status
+from knowledge_loader import get_knowledge_loader
+
 # ============================================
 # 設定儲存 (記憶體 + 檔案)
 # ============================================
@@ -23,9 +26,12 @@ CONFIG_FILE = "config_data.json"
 
 # 預設設定
 DEFAULT_CONFIG = {
-    "openai_api_key": "",
-    "openai_model": "gpt-4o-mini",
+    "gemini_api_key": "",
+    "gemini_model": "gemini-2.0-flash",
     "shopee_chat_url": "https://seller.shopee.tw/portal/chatroom",
+    "products_file": "products.csv",
+    "faq_file": "faq.txt",
+    "cache_ttl_hours": 24,
     "refresh_min": 30,
     "refresh_max": 60,
     "typing_min": 0.1,
@@ -36,22 +42,14 @@ DEFAULT_CONFIG = {
     "typo_simulation": True,
     "use_knowledge_base": True,
     "system_prompt": "你是一位親切專業的電商客服人員。請用繁體中文回覆客戶問題。回答要簡潔有禮貌，不超過100字。",
-    "knowledge_base": """【商店資訊】
-商店名稱：我的蝦皮商店
-營業時間：週一至週五 9:00-18:00
+}
 
-【運費】
-滿 $499 免運
-一般運費 $60
-
-【退換貨】
-7天鑑賞期
-商品需保持完整
-
-【常見問題】
-Q: 什麼時候出貨？
-A: 訂單確認後 1-2 個工作天內出貨
-"""
+# Gemini 快取狀態
+gemini_status = {
+    "initialized": False,
+    "cache_status": "not_initialized",
+    "last_refresh": None,
+    "messages_processed": 0
 }
 
 # 記憶體中的設定
@@ -90,9 +88,12 @@ app = FastAPI(title="蝦皮 AI 客服控制台")
 
 
 class ConfigModel(BaseModel):
-    openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
     shopee_chat_url: str = ""
+    products_file: str = "products.csv"
+    faq_file: str = "faq.txt"
+    cache_ttl_hours: int = 24
     refresh_min: int = 30
     refresh_max: int = 60
     typing_min: float = 0.1
@@ -103,7 +104,11 @@ class ConfigModel(BaseModel):
     typo_simulation: bool = True
     use_knowledge_base: bool = True
     system_prompt: str = ""
-    knowledge_base: str = ""
+
+
+class TestMessageRequest(BaseModel):
+    message: str
+    user_id: str = "test_user"
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -115,11 +120,13 @@ async def index():
 async def get_config():
     config = current_config.copy()
     # 遮蔽 API Key
-    if config.get("openai_api_key"):
-        key = config["openai_api_key"]
+    if config.get("gemini_api_key"):
+        key = config["gemini_api_key"]
         config["api_key_display"] = key[:8] + "..." + key[-4:] if len(key) > 12 else "已設定"
     else:
         config["api_key_display"] = "未設定"
+    # 添加 Gemini 狀態
+    config["gemini_status"] = gemini_status
     return config
 
 
@@ -127,23 +134,103 @@ async def get_config():
 async def update_config(config: ConfigModel):
     data = config.model_dump()
     # 如果 API Key 為空，保留舊的
-    if not data.get("openai_api_key"):
-        data["openai_api_key"] = current_config.get("openai_api_key", "")
+    if not data.get("gemini_api_key"):
+        data["gemini_api_key"] = current_config.get("gemini_api_key", "")
     save_config(data)
     return {"success": True, "message": "設定已儲存"}
+
+
+@app.post("/api/test")
+async def test_reply(request: TestMessageRequest):
+    """測試 AI 回覆"""
+    try:
+        # 檢查是否已初始化
+        if not gemini_status["initialized"]:
+            # 嘗試初始化
+            api_key = current_config.get("gemini_api_key") or os.getenv("GEMINI_API_KEY")
+            if api_key:
+                os.environ["GEMINI_API_KEY"] = api_key
+                os.environ["PRODUCTS_FILE"] = current_config.get("products_file", "products.csv")
+                os.environ["FAQ_FILE"] = current_config.get("faq_file", "faq.txt")
+                success = initialize_gemini()
+                gemini_status["initialized"] = success
+                gemini_status["cache_status"] = "active" if success else "failed"
+            else:
+                return {"error": "請先設定 Gemini API Key"}
+
+        reply = generate_reply(request.message)
+        gemini_status["messages_processed"] += 1
+
+        return {
+            "reply": reply,
+            "user_id": request.user_id,
+            "message": request.message
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/refresh-cache")
+async def refresh_cache():
+    """刷新 Gemini Context Cache"""
+    try:
+        api_key = current_config.get("gemini_api_key") or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            return {"success": False, "message": "請先設定 Gemini API Key"}
+
+        os.environ["GEMINI_API_KEY"] = api_key
+        os.environ["PRODUCTS_FILE"] = current_config.get("products_file", "products.csv")
+        os.environ["FAQ_FILE"] = current_config.get("faq_file", "faq.txt")
+
+        service = get_gemini_service()
+        success = service.initialize_cache(force_refresh=True)
+
+        gemini_status["initialized"] = success
+        gemini_status["cache_status"] = "active" if success else "failed"
+        gemini_status["last_refresh"] = datetime.now().isoformat()
+
+        return {
+            "success": success,
+            "message": "快取刷新成功！" if success else "快取刷新失敗",
+            "cache_info": service.get_cache_status()
+        }
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+@app.get("/api/cache-status")
+async def get_cache_status():
+    """取得 Gemini 快取狀態"""
+    try:
+        service = get_gemini_service()
+        return service.get_cache_status()
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @app.get("/api/download-env")
 async def download_env():
     """下載 .env 設定檔"""
-    env_content = f"""# 蝦皮 AI 客服系統設定檔
-# 請將此檔案放到專案目錄並命名為 .env
+    env_content = f"""# ============================================
+# 蝦皮 AI 客服系統設定檔
+# 使用 Gemini 2.5 Flash + Context Caching
+# ============================================
 
-# OpenAI API Key
-OPENAI_API_KEY={current_config.get('openai_api_key', '')}
+# Gemini API Key (必填)
+# 取得方式: https://aistudio.google.com/apikey
+GEMINI_API_KEY={current_config.get('gemini_api_key', '')}
 
-# AI 模型
-OPENAI_MODEL={current_config.get('openai_model', 'gpt-4o-mini')}
+# Gemini 模型
+GEMINI_MODEL={current_config.get('gemini_model', 'gemini-2.0-flash')}
+
+# 產品資料檔案
+PRODUCTS_FILE={current_config.get('products_file', 'products.csv')}
+
+# FAQ 檔案
+FAQ_FILE={current_config.get('faq_file', 'faq.txt')}
+
+# Context Cache TTL (小時)
+CACHE_TTL_HOURS={current_config.get('cache_ttl_hours', 24)}
 
 # 蝦皮聊天頁面網址
 SHOPEE_CHAT_URL={current_config.get('shopee_chat_url', 'https://seller.shopee.tw/portal/chatroom')}
@@ -160,8 +247,8 @@ TYPING_MAX_DELAY={current_config.get('typing_max', 0.3)}
 SEND_WAIT_MIN={current_config.get('send_wait_min', 1.0)}
 SEND_WAIT_MAX={current_config.get('send_wait_max', 3.0)}
 
-# AI 系統提示詞
-SYSTEM_PROMPT={current_config.get('system_prompt', '')}
+# 功能開關
+AUTO_REPLY_ENABLED={str(current_config.get('auto_reply', True)).lower()}
 """
     return Response(
         content=env_content,
@@ -179,6 +266,66 @@ async def download_knowledge():
         media_type="text/plain",
         headers={"Content-Disposition": "attachment; filename=knowledge_base.txt"}
     )
+
+
+# ============================================
+# 知識庫管理 API
+# ============================================
+
+@app.get("/api/knowledge-base/status")
+async def get_kb_status():
+    """取得知識庫狀態"""
+    try:
+        loader = get_knowledge_loader()
+        status = loader.get_status()
+        return {
+            "success": True,
+            **status
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/knowledge-base/refresh")
+async def refresh_kb():
+    """重新載入知識庫並刷新 Gemini 快取"""
+    try:
+        # 檢查 API Key
+        api_key = current_config.get("gemini_api_key") or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            return {"success": False, "message": "請先設定 Gemini API Key"}
+
+        os.environ["GEMINI_API_KEY"] = api_key
+
+        # 重新載入知識庫
+        result = refresh_knowledge_base()
+
+        # 更新狀態
+        if result.get("files_count", 0) > 0:
+            gemini_status["last_refresh"] = datetime.now().isoformat()
+
+        return {
+            "success": True,
+            "message": f"知識庫已重新載入！共 {result.get('files_count', 0)} 個檔案，{result.get('total_chars', 0)} 字元",
+            **result
+        }
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+@app.get("/api/knowledge-base/files")
+async def list_kb_files():
+    """列出知識庫檔案"""
+    try:
+        loader = get_knowledge_loader()
+        files = loader.scan_files()
+        return {
+            "success": True,
+            "files": files,
+            "count": len(files)
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 # ============================================
@@ -415,16 +562,98 @@ DASHBOARD_HTML = """
             <!-- 知識庫 -->
             <div id="panel-knowledge" class="p-8 hidden">
                 <div class="section-title">
-                    <i class="fas fa-book text-indigo-500"></i> 知識庫
+                    <i class="fas fa-folder-open text-indigo-500"></i> 知識庫管理
                 </div>
 
-                <p class="text-gray-600 mb-4">輸入你商店的相關資訊，AI 回覆時會參考這些內容。包含運費、退換貨政策、常見問題等。</p>
+                <!-- 知識庫說明 -->
+                <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+                    <div class="flex items-start gap-3">
+                        <i class="fas fa-info-circle text-blue-500 mt-1"></i>
+                        <div>
+                            <p class="text-blue-800 font-medium">使用方式</p>
+                            <p class="text-blue-700 text-sm mt-1">
+                                將您的知識庫檔案放入 <code class="bg-blue-100 px-2 py-0.5 rounded">knowledge_base</code> 資料夾中，<br>
+                                支援格式：<span class="font-medium">.csv、.xlsx、.txt、.pdf</span><br>
+                                修改檔案後，點擊下方「重整知識庫」按鈕即可更新，無需重啟系統。
+                            </p>
+                        </div>
+                    </div>
+                </div>
 
-                <textarea id="cfg-knowledge" rows="18" class="input-field font-mono text-sm" placeholder="輸入知識庫內容..."></textarea>
+                <!-- 知識庫狀態 -->
+                <div class="bg-gray-50 rounded-xl p-6 mb-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h4 class="font-bold text-gray-800">知識庫狀態</h4>
+                        <div class="flex items-center gap-2">
+                            <span id="kb-status-badge" class="px-3 py-1 rounded-full text-sm font-medium bg-gray-200 text-gray-600">
+                                檢查中...
+                            </span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                        <div class="bg-white rounded-lg p-4 shadow-sm">
+                            <div id="kb-file-count" class="text-2xl font-bold text-indigo-600">-</div>
+                            <div class="text-sm text-gray-500">檔案數量</div>
+                        </div>
+                        <div class="bg-white rounded-lg p-4 shadow-sm">
+                            <div id="kb-char-count" class="text-2xl font-bold text-green-600">-</div>
+                            <div class="text-sm text-gray-500">總字元數</div>
+                        </div>
+                        <div class="bg-white rounded-lg p-4 shadow-sm">
+                            <div id="kb-loaded-count" class="text-2xl font-bold text-blue-600">-</div>
+                            <div class="text-sm text-gray-500">已載入</div>
+                        </div>
+                        <div class="bg-white rounded-lg p-4 shadow-sm">
+                            <div id="kb-last-refresh" class="text-sm font-medium text-gray-600">-</div>
+                            <div class="text-sm text-gray-500">上次更新</div>
+                        </div>
+                    </div>
+                </div>
 
-                <button onclick="saveConfig()" class="btn btn-primary text-white px-8 py-4 rounded-xl font-bold mt-8">
-                    <i class="fas fa-save mr-2"></i> 儲存知識庫
-                </button>
+                <!-- 檔案列表 -->
+                <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+                    <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                        <h4 class="font-medium text-gray-700">
+                            <i class="fas fa-file-alt mr-2 text-gray-400"></i>
+                            知識庫檔案
+                        </h4>
+                        <button onclick="loadKnowledgeBaseStatus()" class="text-sm text-indigo-600 hover:text-indigo-800">
+                            <i class="fas fa-sync-alt mr-1"></i> 重新整理列表
+                        </button>
+                    </div>
+                    <div id="kb-file-list" class="p-4">
+                        <div class="text-gray-400 text-center py-4">
+                            <i class="fas fa-spinner fa-spin mr-2"></i> 載入中...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 重整按鈕 -->
+                <div class="flex gap-4">
+                    <button onclick="refreshKnowledgeBase()" id="btn-refresh-kb" class="btn btn-primary text-white px-8 py-4 rounded-xl font-bold flex items-center gap-2">
+                        <i class="fas fa-sync-alt" id="icon-refresh-kb"></i>
+                        <span id="text-refresh-kb">重整知識庫</span>
+                    </button>
+                    <button onclick="openKnowledgeFolder()" class="btn bg-gray-200 text-gray-700 px-6 py-4 rounded-xl font-medium flex items-center gap-2 hover:bg-gray-300">
+                        <i class="fas fa-folder-open"></i> 開啟資料夾
+                    </button>
+                </div>
+
+                <!-- 舊版知識庫輸入區（折疊） -->
+                <div class="mt-8 border-t pt-6">
+                    <details class="bg-gray-50 rounded-xl">
+                        <summary class="cursor-pointer p-4 font-medium text-gray-600 hover:text-gray-800">
+                            <i class="fas fa-chevron-right mr-2"></i> 手動輸入知識庫（舊版）
+                        </summary>
+                        <div class="p-4 pt-0">
+                            <p class="text-gray-500 text-sm mb-3">如果您不使用檔案，也可以直接在此輸入知識庫內容：</p>
+                            <textarea id="cfg-knowledge" rows="10" class="input-field font-mono text-sm" placeholder="輸入知識庫內容..."></textarea>
+                            <button onclick="saveConfig()" class="btn btn-primary text-white px-6 py-3 rounded-xl font-bold mt-4">
+                                <i class="fas fa-save mr-2"></i> 儲存
+                            </button>
+                        </div>
+                    </details>
+                </div>
             </div>
         </div>
     </main>
@@ -562,8 +791,147 @@ DASHBOARD_HTML = """
             }, 3000);
         }
 
+        // ============================================
+        // 知識庫功能
+        // ============================================
+
+        // 載入知識庫狀態
+        async function loadKnowledgeBaseStatus() {
+            try {
+                const res = await fetch('/api/knowledge-base/status');
+                const data = await res.json();
+
+                if (data.success) {
+                    // 更新狀態徽章
+                    const badge = document.getElementById('kb-status-badge');
+                    if (data.files_count > 0) {
+                        badge.textContent = '已載入';
+                        badge.className = 'px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-700';
+                    } else {
+                        badge.textContent = '資料夾為空';
+                        badge.className = 'px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-700';
+                    }
+
+                    // 更新統計數據
+                    document.getElementById('kb-file-count').textContent = data.files_count || 0;
+                    document.getElementById('kb-char-count').textContent = formatNumber(data.total_chars || 0);
+                    document.getElementById('kb-loaded-count').textContent = data.loaded_count || 0;
+
+                    // 更新上次刷新時間
+                    if (data.last_refresh) {
+                        const date = new Date(data.last_refresh);
+                        document.getElementById('kb-last-refresh').textContent = date.toLocaleString('zh-TW');
+                    } else {
+                        document.getElementById('kb-last-refresh').textContent = '尚未載入';
+                    }
+
+                    // 更新檔案列表
+                    renderFileList(data.files || []);
+                } else {
+                    document.getElementById('kb-status-badge').textContent = '錯誤';
+                    document.getElementById('kb-status-badge').className = 'px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-700';
+                }
+            } catch (e) {
+                console.error('載入知識庫狀態失敗:', e);
+                document.getElementById('kb-status-badge').textContent = '連線失敗';
+            }
+        }
+
+        // 格式化數字
+        function formatNumber(num) {
+            if (num >= 10000) {
+                return (num / 10000).toFixed(1) + '萬';
+            } else if (num >= 1000) {
+                return (num / 1000).toFixed(1) + 'k';
+            }
+            return num.toString();
+        }
+
+        // 渲染檔案列表
+        function renderFileList(files) {
+            const container = document.getElementById('kb-file-list');
+
+            if (!files || files.length === 0) {
+                container.innerHTML = `
+                    <div class="text-gray-400 text-center py-8">
+                        <i class="fas fa-folder-open text-4xl mb-3 block"></i>
+                        <p>資料夾為空</p>
+                        <p class="text-sm mt-1">請將 .csv、.xlsx、.txt 或 .pdf 檔案放入 knowledge_base 資料夾</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const fileIcons = {
+                '.csv': 'fa-file-csv text-green-500',
+                '.xlsx': 'fa-file-excel text-green-600',
+                '.xls': 'fa-file-excel text-green-600',
+                '.txt': 'fa-file-alt text-blue-500',
+                '.pdf': 'fa-file-pdf text-red-500'
+            };
+
+            const html = files.map(file => {
+                const icon = fileIcons[file.extension] || 'fa-file text-gray-400';
+                return `
+                    <div class="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
+                        <div class="flex items-center gap-3">
+                            <i class="fas ${icon} text-lg"></i>
+                            <div>
+                                <div class="font-medium text-gray-800">${file.name}</div>
+                                <div class="text-xs text-gray-400">${file.size_display}</div>
+                            </div>
+                        </div>
+                        <div class="text-xs text-gray-400">
+                            ${new Date(file.modified).toLocaleString('zh-TW')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = html;
+        }
+
+        // 重整知識庫
+        async function refreshKnowledgeBase() {
+            const btn = document.getElementById('btn-refresh-kb');
+            const icon = document.getElementById('icon-refresh-kb');
+            const text = document.getElementById('text-refresh-kb');
+
+            // 顯示載入狀態
+            btn.disabled = true;
+            icon.classList.add('fa-spin');
+            text.textContent = '重整中...';
+
+            try {
+                const res = await fetch('/api/knowledge-base/refresh', {
+                    method: 'POST'
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    showToast(data.message, true);
+                    loadKnowledgeBaseStatus(); // 重新載入狀態
+                } else {
+                    showToast(data.message || '重整失敗', false);
+                }
+            } catch (e) {
+                showToast('重整失敗: ' + e.message, false);
+            } finally {
+                // 恢復按鈕狀態
+                btn.disabled = false;
+                icon.classList.remove('fa-spin');
+                text.textContent = '重整知識庫';
+            }
+        }
+
+        // 開啟知識庫資料夾（僅本地有效）
+        function openKnowledgeFolder() {
+            showToast('請手動開啟專案目錄中的 knowledge_base 資料夾', true);
+        }
+
         // 初始化
         loadConfig();
+        loadKnowledgeBaseStatus(); // 載入知識庫狀態
     </script>
 </body>
 </html>
