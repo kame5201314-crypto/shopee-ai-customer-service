@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-蝦皮 AI 客服系統 - 安全強化版
+遇見未來 AI客服系統
 支援 OpenAI 和 Google Gemini
 
 安全功能：
@@ -237,7 +237,7 @@ def invalidate_session(token: str):
 # FastAPI 應用
 # ============================================
 
-app = FastAPI(title="蝦皮 AI 客服控制台 - 安全版")
+app = FastAPI(title="遇見未來 AI客服控制台 - 安全版")
 
 # CORS 設定 (生產環境應限制來源)
 app.add_middleware(
@@ -548,7 +548,7 @@ DASHBOARD_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>蝦皮 AI 客服控制台</title>
+    <title>遇見未來 AI客服控制台</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -621,10 +621,10 @@ DASHBOARD_HTML = """
             <div class="flex items-center justify-between">
                 <div class="flex items-center gap-5">
                     <div class="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur">
-                        <i class="fas fa-robot text-3xl"></i>
+                        <span class="text-3xl font-bold">M</span>
                     </div>
                     <div>
-                        <h1 class="text-3xl font-bold">蝦皮 AI 客服控制台</h1>
+                        <h1 class="text-3xl font-bold">遇見未來 AI客服控制台</h1>
                         <p class="text-white/80 mt-1">
                             <span class="security-badge"><i class="fas fa-shield-alt mr-1"></i>安全強化版</span>
                         </p>
@@ -677,6 +677,7 @@ DASHBOARD_HTML = """
                 <div class="tab" onclick="showTab('switches')"><i class="fas fa-toggle-on mr-2"></i>功能開關</div>
                 <div class="tab" onclick="showTab('prompt')"><i class="fas fa-comment mr-2"></i>AI 提示詞</div>
                 <div class="tab" onclick="showTab('knowledge')"><i class="fas fa-book mr-2"></i>知識庫</div>
+                <div class="tab" onclick="showTab('test')"><i class="fas fa-flask mr-2"></i>測試</div>
                 <div class="tab" onclick="showTab('logs')"><i class="fas fa-history mr-2"></i>審計日誌</div>
             </div>
 
@@ -869,6 +870,54 @@ DASHBOARD_HTML = """
                 </button>
             </div>
 
+            <!-- 測試 AI 回覆 -->
+            <div id="panel-test" class="p-8 hidden">
+                <div class="section-title">
+                    <i class="fas fa-flask text-purple-500"></i> 測試 AI 回覆
+                </div>
+
+                <p class="text-gray-600 mb-4">輸入測試訊息，即時測試 AI 的回覆效果</p>
+
+                <div class="space-y-6 max-w-2xl">
+                    <!-- 測試輸入 -->
+                    <div>
+                        <label class="block font-medium text-gray-700 mb-2">模擬客戶訊息</label>
+                        <textarea id="test-message" rows="3" class="input-field" placeholder="例如：運費多少？可以退貨嗎？"></textarea>
+                    </div>
+
+                    <!-- 發送按鈕 -->
+                    <button onclick="testAIReply()" id="btn-test" class="btn btn-primary text-white px-8 py-4 rounded-xl font-bold flex items-center gap-2">
+                        <i class="fas fa-paper-plane" id="icon-test"></i>
+                        <span id="text-test">測試回覆</span>
+                    </button>
+
+                    <!-- AI 回覆結果 -->
+                    <div id="test-result" class="hidden">
+                        <label class="block font-medium text-gray-700 mb-2">AI 回覆</label>
+                        <div id="test-reply" class="bg-green-50 border border-green-200 rounded-xl p-4 text-gray-800">
+                            <!-- AI 回覆內容 -->
+                        </div>
+                        <div class="mt-2 text-sm text-gray-500">
+                            <span id="test-model">模型: -</span>
+                            <span class="mx-2">|</span>
+                            <span id="test-time">耗時: -</span>
+                        </div>
+                    </div>
+
+                    <!-- 快速測試範例 -->
+                    <div class="mt-8">
+                        <label class="block font-medium text-gray-700 mb-3">快速測試範例</label>
+                        <div class="flex flex-wrap gap-2">
+                            <button onclick="setTestMessage('運費怎麼算？')" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm">運費怎麼算？</button>
+                            <button onclick="setTestMessage('可以退貨嗎？')" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm">可以退貨嗎？</button>
+                            <button onclick="setTestMessage('什麼時候會出貨？')" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm">什麼時候會出貨？</button>
+                            <button onclick="setTestMessage('有現貨嗎？')" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm">有現貨嗎？</button>
+                            <button onclick="setTestMessage('可以面交嗎？')" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm">可以面交嗎？</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- 審計日誌 -->
             <div id="panel-logs" class="p-8 hidden">
                 <div class="section-title">
@@ -890,7 +939,7 @@ DASHBOARD_HTML = """
 
     <!-- Footer -->
     <footer class="text-center py-8 text-gray-400 text-sm">
-        <p>蝦皮 AI 客服系統 - 安全強化版 &copy; 2024</p>
+        <p>遇見未來 AI客服系統 &copy; 2024</p>
     </footer>
 
     <!-- Toast -->
