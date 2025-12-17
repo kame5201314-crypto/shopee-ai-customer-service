@@ -542,7 +542,7 @@ async def get_audit_logs(request: Request, session_token: Optional[str] = Cookie
     return {"logs": list(reversed(audit_logs[-limit:]))}
 
 # ============================================
-# 測試 AI 回覆 API (需要認證)
+# AI 客服助手 API (需要認證)
 # ============================================
 
 class TestMessageRequest(BaseModel):
@@ -550,7 +550,7 @@ class TestMessageRequest(BaseModel):
 
 @app.post("/api/test-ai")
 async def test_ai_reply(request: Request, data: TestMessageRequest, session_token: Optional[str] = Cookie(None, alias="session_token")):
-    """測試 AI 回覆 (需要認證)"""
+    """AI 客服助手 (需要認證)"""
     ip = get_client_ip(request)
 
     if not await verify_auth(request, session_token):
@@ -754,7 +754,7 @@ DASHBOARD_HTML = """
                 <div class="tab" onclick="showTab('switches')"><i class="fas fa-toggle-on mr-2"></i>功能開關</div>
                 <div class="tab" onclick="showTab('prompt')"><i class="fas fa-comment mr-2"></i>AI 提示詞</div>
                 <div class="tab" onclick="showTab('knowledge')"><i class="fas fa-book mr-2"></i>知識庫</div>
-                <div class="tab" onclick="showTab('test')"><i class="fas fa-flask mr-2"></i>測試</div>
+                <div class="tab" onclick="showTab('test')"><i class="fas fa-headset mr-2"></i>測試</div>
                 <div class="tab" onclick="showTab('logs')"><i class="fas fa-history mr-2"></i>審計日誌</div>
             </div>
 
@@ -947,32 +947,32 @@ DASHBOARD_HTML = """
                 </button>
             </div>
 
-            <!-- 測試 AI 回覆 -->
+            <!-- AI 客服助手 -->
             <div id="panel-test" class="p-8 hidden">
                 <div class="section-title">
-                    <i class="fas fa-flask text-purple-500"></i> 測試 AI 回覆
+                    <i class="fas fa-headset text-purple-500"></i> AI 客服助手
                 </div>
 
-                <p class="text-gray-600 mb-4">輸入測試訊息，即時測試 AI 的回覆效果</p>
+                <p class="text-gray-600 mb-4">從蝦皮複製客戶問題 → 貼上 → 生成回覆 → 複製貼回蝦皮</p>
 
                 <div class="space-y-6 max-w-2xl">
                     <!-- 測試輸入 -->
                     <div>
-                        <label class="block font-medium text-gray-700 mb-2">模擬客戶訊息</label>
+                        <label class="block font-medium text-gray-700 mb-2">貼上客戶問題</label>
                         <textarea id="test-message" rows="3" class="input-field" placeholder="例如：運費多少？可以退貨嗎？"></textarea>
                     </div>
 
                     <!-- 發送按鈕 -->
                     <button onclick="testAIReply()" id="btn-test" class="btn btn-primary text-white px-8 py-4 rounded-xl font-bold flex items-center gap-2">
-                        <i class="fas fa-paper-plane" id="icon-test"></i>
+                        <i class="fas fa-magic" id="icon-test"></i>
                         <span id="text-test">測試回覆</span>
                     </button>
 
                     <!-- AI 回覆結果 -->
                     <div id="test-result" class="hidden">
                         <label class="block font-medium text-gray-700 mb-2">AI 回覆</label>
-                        <div id="test-reply" class="bg-green-50 border border-green-200 rounded-xl p-4 text-gray-800">
-                            <!-- AI 回覆內容 -->
+                        <div class="relative"><div id="test-reply" class="bg-green-50 border-2 border-green-300 rounded-xl p-5 pr-28 text-gray-800 text-lg min-h-[80px]">
+                            </div><button onclick="copyReply()" class="absolute top-3 right-3 btn bg-green-500 hover:bg-green-600 text-white px-4 py-3 rounded-lg font-bold shadow-lg"><i class="fas fa-copy mr-2"></i>複製回覆</button></div>
                         </div>
                         <div class="mt-2 text-sm text-gray-500">
                             <span id="test-model">模型: -</span>
@@ -1307,7 +1307,7 @@ DASHBOARD_HTML = """
             }, 3000);
         }
 
-        // 測試 AI 回覆
+        // AI 客服助手
         async function testAIReply() {
             const message = document.getElementById('test-message').value.trim();
             if (!message) {
@@ -1347,10 +1347,14 @@ DASHBOARD_HTML = """
                 showToast('測試失敗: ' + e.message, false);
             } finally {
                 btn.disabled = false;
-                icon.className = 'fas fa-paper-plane';
-                text.textContent = '測試回覆';
+                icon.className = 'fas fa-magic';
+                text.textContent = '生成 AI 回覆';
             }
         }
+
+        function copyReply() { const reply = document.getElementById('test-reply').textContent; if (!reply) { showToast('沒有可複製的回覆', false); return; } navigator.clipboard.writeText(reply).then(() => { showToast('已複製！可以貼到蝦皮了', true); }).catch(() => { showToast('複製失敗', false); }); }
+
+        function clearAll() { document.getElementById('test-message').value = ''; document.getElementById('test-result').classList.add('hidden'); }
 
         function setTestMessage(msg) {
             document.getElementById('test-message').value = msg;
