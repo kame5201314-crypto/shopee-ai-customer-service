@@ -754,7 +754,7 @@ DASHBOARD_HTML = """
                 <div class="tab" onclick="showTab('switches')"><i class="fas fa-toggle-on mr-2"></i>功能開關</div>
                 <div class="tab" onclick="showTab('prompt')"><i class="fas fa-comment mr-2"></i>AI 提示詞</div>
                 <div class="tab" onclick="showTab('knowledge')"><i class="fas fa-book mr-2"></i>知識庫</div>
-                <div class="tab" onclick="showTab('test')"><i class="fas fa-headset mr-2"></i>測試</div>
+                <div class="tab" onclick="showTab('test')"><i class="fas fa-headset mr-2"></i>AI 客服助手</div>
                 <div class="tab" onclick="showTab('logs')"><i class="fas fa-history mr-2"></i>審計日誌</div>
             </div>
 
@@ -965,14 +965,17 @@ DASHBOARD_HTML = """
                     <!-- 發送按鈕 -->
                     <button onclick="testAIReply()" id="btn-test" class="btn btn-primary text-white px-8 py-4 rounded-xl font-bold flex items-center gap-2">
                         <i class="fas fa-magic" id="icon-test"></i>
-                        <span id="text-test">測試回覆</span>
+                        <span id="text-test">生成 AI 回覆</span>
                     </button>
 
                     <!-- AI 回覆結果 -->
                     <div id="test-result" class="hidden">
                         <label class="block font-medium text-gray-700 mb-2">AI 回覆</label>
-                        <div class="relative"><div id="test-reply" class="bg-green-50 border-2 border-green-300 rounded-xl p-5 pr-28 text-gray-800 text-lg min-h-[80px]">
-                            </div><button onclick="copyReply()" class="absolute top-3 right-3 btn bg-green-500 hover:bg-green-600 text-white px-4 py-3 rounded-lg font-bold shadow-lg"><i class="fas fa-copy mr-2"></i>複製回覆</button></div>
+                        <div class="relative">
+                            <div id="test-reply" class="bg-green-50 border-2 border-green-300 rounded-xl p-5 pr-32 text-gray-800 text-lg min-h-[100px]">
+                            </div>
+                            <button onclick="copyReply()" class="absolute top-3 right-3 btn bg-green-500 hover:bg-green-600 text-white px-5 py-3 rounded-lg font-bold shadow-lg"><i class="fas fa-copy mr-2"></i>複製回覆</button>
+                        </div>
                         </div>
                         <div class="mt-2 text-sm text-gray-500">
                             <span id="test-model">模型: -</span>
