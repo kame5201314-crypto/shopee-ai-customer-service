@@ -29,6 +29,13 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+# AI 服務
+try:
+    import google.generativeai as genai
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
+
 # ============================================
 # 安全配置
 # ============================================
@@ -84,11 +91,15 @@ api_calls: Dict[str, list] = defaultdict(list)
 # 審計日誌
 audit_logs: list = []
 
+# 從環境變數讀取 API Key
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+
 # 配置儲存
 DEFAULT_CONFIG = {
-    "ai_provider": "openai",
-    "openai_api_key": "",
-    "gemini_api_key": "",
+    "ai_provider": "gemini" if GEMINI_API_KEY else "openai",
+    "openai_api_key": OPENAI_API_KEY,
+    "gemini_api_key": GEMINI_API_KEY,
     "ai_model": "gpt-4o-mini",
     "shopee_chat_url": "https://seller.shopee.tw/portal/chatroom",
     "refresh_min": 30,
@@ -529,6 +540,72 @@ async def get_audit_logs(request: Request, session_token: Optional[str] = Cookie
 
     # 返回最近的日誌，最新的在前面
     return {"logs": list(reversed(audit_logs[-limit:]))}
+
+# ============================================
+# 測試 AI 回覆 API (需要認證)
+# ============================================
+
+class TestMessageRequest(BaseModel):
+    message: str
+
+@app.post("/api/test-ai")
+async def test_ai_reply(request: Request, data: TestMessageRequest, session_token: Optional[str] = Cookie(None, alias="session_token")):
+    """測試 AI 回覆 (需要認證)"""
+    ip = get_client_ip(request)
+
+    if not await verify_auth(request, session_token):
+        add_audit_log("TEST_AI_UNAUTHORIZED", ip, success=False)
+        raise HTTPException(status_code=401, detail="請先登入")
+
+    start_time = time.time()
+
+    # 檢查是否有 Gemini API Key
+    api_key = current_config.get("gemini_api_key") or GEMINI_API_KEY
+    if not api_key:
+        raise HTTPException(status_code=400, detail="尚未設定 Gemini API Key")
+
+    if not GENAI_AVAILABLE:
+        raise HTTPException(status_code=500, detail="Google Generative AI 套件未安裝")
+
+    try:
+        # 配置 Gemini
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+
+        # 建立提示詞
+        system_prompt = current_config.get("system_prompt", "你是一位親切專業的電商客服人員。")
+        knowledge_base = current_config.get("knowledge_base", "")
+
+        full_prompt = f"""
+{system_prompt}
+
+【知識庫參考資料】
+{knowledge_base}
+
+【客戶問題】
+{data.message}
+
+請根據以上資訊回覆客戶，回答要簡潔有禮貌。
+"""
+
+        # 呼叫 AI
+        response = model.generate_content(full_prompt)
+        reply = response.text.strip()
+
+        elapsed = round(time.time() - start_time, 2)
+
+        add_audit_log("TEST_AI_SUCCESS", ip, user="admin", details=f"Message: {data.message[:50]}...")
+
+        return {
+            "success": True,
+            "reply": reply,
+            "model": "gemini-2.0-flash",
+            "elapsed": f"{elapsed}s"
+        }
+
+    except Exception as e:
+        add_audit_log("TEST_AI_ERROR", ip, user="admin", details=str(e), success=False)
+        raise HTTPException(status_code=500, detail=f"AI 回覆失敗: {str(e)}")
 
 # ============================================
 # 主頁面
@@ -1228,6 +1305,55 @@ DASHBOARD_HTML = """
             setTimeout(() => {
                 toast.className = 'fixed bottom-6 right-6 bg-green-500 text-white px-6 py-4 rounded-xl shadow-2xl transform translate-y-32 opacity-0 transition-all duration-300 flex items-center gap-3 z-50';
             }, 3000);
+        }
+
+        // 測試 AI 回覆
+        async function testAIReply() {
+            const message = document.getElementById('test-message').value.trim();
+            if (!message) {
+                showToast('請輸入測試訊息', false);
+                return;
+            }
+
+            const btn = document.getElementById('btn-test');
+            const icon = document.getElementById('icon-test');
+            const text = document.getElementById('text-test');
+
+            // 顯示載入狀態
+            btn.disabled = true;
+            icon.className = 'fas fa-spinner fa-spin';
+            text.textContent = '處理中...';
+
+            try {
+                const res = await fetch('/api/test-ai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message }),
+                    credentials: 'include'
+                });
+
+                const data = await res.json();
+
+                if (res.ok && data.success) {
+                    document.getElementById('test-result').classList.remove('hidden');
+                    document.getElementById('test-reply').textContent = data.reply;
+                    document.getElementById('test-model').textContent = '模型: ' + data.model;
+                    document.getElementById('test-time').textContent = '耗時: ' + data.elapsed;
+                    showToast('AI 回覆成功！', true);
+                } else {
+                    showToast(data.detail || 'AI 回覆失敗', false);
+                }
+            } catch (e) {
+                showToast('測試失敗: ' + e.message, false);
+            } finally {
+                btn.disabled = false;
+                icon.className = 'fas fa-paper-plane';
+                text.textContent = '測試回覆';
+            }
+        }
+
+        function setTestMessage(msg) {
+            document.getElementById('test-message').value = msg;
         }
 
         // 初始化
