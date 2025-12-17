@@ -20,6 +20,8 @@ import os
 import hashlib
 import secrets
 import time
+import urllib.request
+import urllib.error
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from collections import defaultdict
@@ -28,13 +30,6 @@ from fastapi import FastAPI, HTTPException, Response, Request, Depends, Cookie
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-
-# AI 服務
-try:
-    import google.generativeai as genai
-    GENAI_AVAILABLE = True
-except ImportError:
-    GENAI_AVAILABLE = False
 
 # ============================================
 # 安全配置
@@ -550,7 +545,7 @@ class TestMessageRequest(BaseModel):
 
 @app.post("/api/test-ai")
 async def test_ai_reply(request: Request, data: TestMessageRequest, session_token: Optional[str] = Cookie(None, alias="session_token")):
-    """AI 客服助手 (需要認證)"""
+    """AI 客服助手 (需要認證) - 使用 REST API 直接呼叫 Gemini"""
     ip = get_client_ip(request)
 
     if not await verify_auth(request, session_token):
@@ -564,20 +559,12 @@ async def test_ai_reply(request: Request, data: TestMessageRequest, session_toke
     if not api_key:
         raise HTTPException(status_code=400, detail="尚未設定 Gemini API Key")
 
-    if not GENAI_AVAILABLE:
-        raise HTTPException(status_code=500, detail="Google Generative AI 套件未安裝")
-
     try:
-        # 配置 Gemini
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-
         # 建立提示詞
         system_prompt = current_config.get("system_prompt", "你是一位親切專業的電商客服人員。")
         knowledge_base = current_config.get("knowledge_base", "")
 
-        full_prompt = f"""
-{system_prompt}
+        full_prompt = f"""{system_prompt}
 
 【知識庫參考資料】
 {knowledge_base}
@@ -585,12 +572,41 @@ async def test_ai_reply(request: Request, data: TestMessageRequest, session_toke
 【客戶問題】
 {data.message}
 
-請根據以上資訊回覆客戶，回答要簡潔有禮貌。
-"""
+請根據以上資訊回覆客戶，回答要簡潔有禮貌。"""
 
-        # 呼叫 AI
-        response = model.generate_content(full_prompt)
-        reply = response.text.strip()
+        # 使用 REST API 直接呼叫 Gemini (避免 SDK 在 serverless 環境的問題)
+        model_name = "gemini-2.0-flash"
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+
+        request_body = {
+            "contents": [{
+                "parts": [{
+                    "text": full_prompt
+                }]
+            }],
+            "generationConfig": {
+                "temperature": 0.7,
+                "maxOutputTokens": 500
+            }
+        }
+
+        req = urllib.request.Request(
+            api_url,
+            data=json.dumps(request_body).encode('utf-8'),
+            headers={
+                'Content-Type': 'application/json'
+            },
+            method='POST'
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+
+        # 解析回應
+        if 'candidates' in result and len(result['candidates']) > 0:
+            reply = result['candidates'][0]['content']['parts'][0]['text'].strip()
+        else:
+            raise Exception("AI 回應格式錯誤")
 
         elapsed = round(time.time() - start_time, 2)
 
@@ -599,10 +615,17 @@ async def test_ai_reply(request: Request, data: TestMessageRequest, session_toke
         return {
             "success": True,
             "reply": reply,
-            "model": "gemini-2.0-flash",
+            "model": model_name,
             "elapsed": f"{elapsed}s"
         }
 
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8') if e.fp else str(e)
+        add_audit_log("TEST_AI_ERROR", ip, user="admin", details=f"HTTP {e.code}: {error_body[:200]}", success=False)
+        raise HTTPException(status_code=500, detail=f"Gemini API 錯誤: {error_body[:100]}")
+    except urllib.error.URLError as e:
+        add_audit_log("TEST_AI_ERROR", ip, user="admin", details=f"URL Error: {str(e)}", success=False)
+        raise HTTPException(status_code=500, detail=f"網路連線錯誤: {str(e)}")
     except Exception as e:
         add_audit_log("TEST_AI_ERROR", ip, user="admin", details=str(e), success=False)
         raise HTTPException(status_code=500, detail=f"AI 回覆失敗: {str(e)}")
